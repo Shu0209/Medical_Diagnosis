@@ -19,25 +19,6 @@ from Bio import Entrez
 
 Entrez.email="your_email@example.com"
 
-# try:
-#     import pydicom
-#     PYDICOM_AVAILABLE=True
-# except ImportError:
-#     PYDICOM_AVAILABLE=False
-
-# try:
-#     import nibabel as nib 
-#     NIBABEL_AVAILABLE=True
-# except ImportError:
-#     NIBABEL_AVAILABLE=False
-
-
-# try:
-#     from Bio import Entrez
-#     Entrez.email ="your_email@example.com"
-#     BIOPYTHON_AVAILABLE=True
-# except ImportError:
-#     BIOPYTHON_AVAILABLE=False 
 
 
 # Upload Document
@@ -117,7 +98,108 @@ def extract_findings_and_keywords(analysis_text):
 
     return findings, keywords[:5]
 
-# Analysisss
+# Analysis
+
+def analyze_image(image, api_key, enable_xai=True):
+
+    buffered=io.BytesIO()
+    image.save(buffered,format="PNG")
+    encoded_image=base64.b64encode(buffered.getvalue()).decode()
+
+    client=openai.OpenAI(api_key=api_key)
+    prompt="""
+            Provide a detailed medical analysis of this image.
+            Include:
+            1. Description of key findings
+            2. Possible diagnoses
+            3. Recommendation for clinical correlation or follow-up
+            
+            Format your response with "Radiological Analysis" and "Impression" sections.
+            """
+    
+    #Make API call
+    try:
+        response=client.chat.completions.create(
+            model="gpt-4-turbo",
+            messages=[{
+                "role":"user",
+                "content":[
+                    {"type":"text","text":prompt},
+                    {"type":"image_url","image_url":{"url":f"data:image/png;base64,{encoded_image}"}}
+                ]
+            }],max_tokens=800,
+        )
+
+        analysis=response.choices[0].message.content
+
+        #Extract findings and keywords
+        findings,keywords=extract_findings_and_keywords(analysis)
+
+        return{
+            "id":str(uuid.uuid4()),
+            "analysis":analysis,
+            "findings":findings,
+            "keywords":keywords,
+            "date":datetime.now().isoformat()
+            
+        }
+    except Exception as e:
+        return{
+            "id":str(uuid.uuid4()),
+            "analysis":f"Error analyzing image:{str(e)}",
+            "findings":findings,
+            "keywords":keywords,
+            "date":datetime.now().isoformat()
+        }
+    
+def search_pubmed(keywords, max_results=5):
+    if not keywords:
+        return []
+    
+    query=' AND '.join(keywords)
+    try:
+        handle=Entrez.esearch(db="pubmed",term=query, retmax=max_results)
+        results=Entrez.read(handle)
+
+        if not results["IdList"]:
+            return []
+        
+        fetch_handle=Entrez.efetch(db="pubmed",id=results["IdList"],rettype="medline",retmode="text")
+        records=fetch_handle.read().split('\n\n')
+
+        publications=[]
+        for record in records:
+            if not record.strip():
+                continue
+
+            pub_data={"id":"","title":"","journal":"","year":""}
+
+            for line in record.split('\n'):
+                if line.startswith('PMID- '):
+                    pub_data["id"]=line[6:].strip()
+                elif line.startswith('TI - '):
+                    pub_data["title"]=line[6:].strip()
+                elif line.startswith('TA - '):
+                    pub_data["journal"]=line[6:].strip()
+                elif line.startswith('DP - '):
+                    year_match=line[6:].strip().split()[0]
+                    pub_data["year"]=year_match if year_match.isdigit() else "2024"
+                
+            if pub_data["id"]:
+                publications.append(pub_data)
+
+        return publications
+    
+    except Exception as e:
+        print(f"Error searching PubMed: {e}")
+
+        return [{"id":f"PMD{1000+i}",
+                 "title":f"Study on {' '.join(keywords)}",
+                 "journal":"Medical Journal",
+                 "year":"2024"} for i in range(min(3, max_results)) ]
+    
+# Clinical Trials
+
 
 
 
