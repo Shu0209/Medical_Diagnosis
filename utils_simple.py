@@ -15,6 +15,9 @@ from io import BytesIO
 import pydicom
 import nibabel as nib 
 from Bio import Entrez
+import openai
+from reportlab.lib.pagesizes import letter
+import json
 
 
 Entrez.email="your_email@example.com"
@@ -199,6 +202,159 @@ def search_pubmed(keywords, max_results=5):
                  "year":"2024"} for i in range(min(3, max_results)) ]
     
 # Clinical Trials
+def generate_report(data,include_references=True):
+    buffer=io.BytesIO()
+    doc=SimpleDocTemplate(buffer,pagesize=letter)
+    styles=getSampleStyleSheet()
+
+    #Custom style
+    title_style=ParagraphStyle(
+        'Title',
+        parent=styles['heading1'],
+        fontSize=18,
+        spaceAfter=12
+    )
+
+    subtitle_style=ParagraphStyle(
+        'Subtitle',
+        parent=styles['Heading2'],
+        fontSize=14,
+        spaceAfter=8
+    )
+
+    #Build content
+    content=[]
+
+    #Header
+    content.append(Paragraph("Medical Imaging Analysis Report", title_style))
+    content.append(Spacer(1,12))
+
+    #Date and ID
+    content.append(Paragraph(f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M')}",styles["Normal"]))
+    content.append(Paragraph(f"Report ID:{data['id']}",styles["Normal"]))
+    if 'filename' in data:
+        content.append(Paragraph(f"Image: {data['filename']}",styles["Normal"]))
+    content.append(Spacer(1,12))
+
+    #Analysis
+    content.append(Paragraph("Analysis Result", subtitle_style))
+    content.append(Paragraph(data['analysis'],styles["Normal"]))
+    content.append(Spacer(1,12))
+
+    #Key Finding
+    if data.get('findings'):
+        content.append(Paragraph("Key Finding",subtitle_style))
+        for idx, finding in enumerate(data['finding'],1):
+            content.append(Paragraph(f"{idx}.{finding}",styles["Normal"]))
+        content.append(Spacer(1,12))
+    #Keywords
+    if data.get('keywords'):
+        content.append(Paragraph("Keywords",subtitle_style))
+        content.append(Paragraph(f"{', '.join(data['keywords'])}",styles["Normal"]))
+        content.append(Spacer(1,12))
+
+    # Add references if available and requested
+    if include_references:
+        pubmed_results=search_pubmed(data.get('keyword',[]),max_results=3)
+        if pubmed_results:
+            content.append(Paragraph("Relevant Medical Literature",subtitle_style))
+            for ref in pubmed_results:
+                content.append(Paragraph(f" {ref['title']}",styles["Normal"]))
+                content.append(Paragraph(f" {ref['journal']},{ref['year']}(PMID:{ref['id']})",styles["Normal"]))
+            content.append(Spacer(1,12))
+
+        #Search clinical trials
+        trial_results=search_clinical_trials(data.get('keywords',[]),max_result=2)
+        if trial_results:
+            content.append(Paragraph("Related Clinical Trials",subtitle_style))
+            for trial in trial_results:
+                content.append(Paragraph(f" {trial['title']}",styles["Normal"]))
+                content.append(Paragraph(f" ID:{trial['id']},Status:{trial['status']}",styles["Normal"]))
+
+
+    #Build the PDF
+    doc.build(content)
+    buffer.seek(0)
+    return buffer
+
+def get_analysis_store():
+    """Get the analysis storage"""
+    if os.path.exists("analysis_store.json"):
+        with open("analysis_store.json","r") as f:
+            return json.load(f)
+        return{"ans;yses":[]}
+    
+def save_analysis(analysis_data,filename="unknown.jpg"):
+    store=get_analysis_store()
+
+    #Add filename to analysis data
+    analysis_data["filename"]=filename
+
+    #Add to store
+    store["analyses"].append(analysis_data)
+
+    #Save back to file
+    with open("analysis_store.json","w") as f:
+        json.dump(store,f)
+    return analysis_data
+
+
+
+def get_analysis_by_id(analysis_id):
+    store=get_analysis_store()
+
+    for analysis in store["analysis"]:
+        if analysis["id"]==analysis_id:
+            return analysis
+        
+    return None
+
+def get_latest_analyses(limit=5):
+    store=get_analysis_store()
+
+    #Sort by date (newest first)
+    sorted_analyses=sorted(store["analyses"],
+                           key=lambda x:x.get("date",""),
+                           reverse=True)
+    
+
+    return sorted_analyses[:limit]
+
+def extract_common_findings():
+    store=get_analysis_store()
+
+    keyword_counts={}
+    for analysis in store["analyses"]:
+        for keyword in analysis.get("keywords",[]):
+            if keyword in keyword_counts:
+                keyword_counts[keyword]+=1
+            else:
+                keyword_counts[keyword]=1
+
+    #Sort by Frequency
+    sorted_keywords=sorted(keyword_counts.items(),key=lambda x:x[1],reverse=True)
+
+    return sorted_keywords
+
+
+
+    
+
+
+
+
+    
+
+
+
+
+
+
+
+
+
+
+
 
 
 
