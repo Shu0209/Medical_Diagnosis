@@ -202,6 +202,16 @@ def search_pubmed(keywords, max_results=5):
                  "year":"2024"} for i in range(min(3, max_results)) ]
     
 # Clinical Trials
+def search_clinical_trials(keywords, max_results=3):
+    if not keywords:
+        return []
+    
+    return  [{"id": f"NCT{1000+idx}",
+            "title": f"Clinical Trial on {' '.join(keywords[:2])}",
+            "status":"Recruiting",
+            "phase": f"Phase {idx+1}"}
+            for idx in range(max_results)]
+
 def generate_report(data,include_references=True):
     buffer=io.BytesIO()
     doc=SimpleDocTemplate(buffer,pagesize=letter)
@@ -335,6 +345,64 @@ def extract_common_findings():
     sorted_keywords=sorted(keyword_counts.items(),key=lambda x:x[1],reverse=True)
 
     return sorted_keywords
+
+
+def genrate_statistics_report():
+    store=get_analysis_store()
+    if not store["analyses"]:
+        return None
+    
+    type_counts={}
+    for analysis in store["analyses"]:
+        analysis_type=analysis.get("type","unknown")
+        if analysis_type in type_counts:
+            type_counts[analysis_type]+=1
+        else:
+            type_counts[analysis_type]=1
+
+    # Get common findings
+    common_findings=extract_common_findings()
+
+    #Create report
+    buffer=io.BytesIO()
+    doc=SimpleDocTemplate(buffer, pagesize=letter)
+    styles=getSampleStyleSheet()
+
+    content=[]
+
+    #Title
+    content.append(Paragraph("Medical Imaging Statistics Report",styles["Title"]))
+    content.append(Spacer(1,12))
+
+    #Overall statistics
+
+    content.append(Paragraph("Overall Statistics", styles["Heading2"]))
+    content.append(Paragraph(f"Total analysis: {len(store["analyses"])}",styles["Normal"]))
+    content.append(Spacer(1,12))
+
+    #Analysis type
+    if type_counts:
+        content.append(Paragraph("Analysis Types",styles["Heading2"]))
+        for type_name, count in type_counts.items():
+            content.append(Paragraph(f"{type_name.capitalize()}: {count}",styles["Normal"]))
+
+        content.append(Spacer(1,12))
+
+    #Common finding
+    if common_findings:
+        content.append(Paragraph("Common Finding", styles["Heading2"]))
+        for keyword, count in common_findings[:10]:
+            content.append(Paragraph(f"{keyword.capitalize()}: {count} occurrences",styles["Normal"]))
+
+    #Build the PDF
+    doc.build(content)
+    buffer.seek(0)
+    return buffer
+
+
+
+
+            
 
 
 
