@@ -171,7 +171,7 @@ class ReportQASystem:
             return f"I encountered an error while answering your question: {str(e)}"
 
 
-    def clear_distory(self):
+    def clear_history(self):
         self.conversation_history=[]
         return "Conversation history is clear"
     
@@ -179,4 +179,97 @@ class ReportQASystem:
 class ReportQAChat:
     def __init__(self):
         self.qa_chat_store=self.get_qa_chat_store()
+
+    
+    def get_qa_chat_store(self):
+        """Get the QA chat storage"""
+        if os.path.exists("qa_chat_store.json"):
+            with open("qa_chat_store.json","r") as f:
+                return json.load(f)
+        return {"room":{}}
+    
+    def save_qa_chat_store(self):
+        """Save the QA chat storage"""
+        with open("qa_chat_store.json","w") as f:
+            json.dump(self.qa_chat_store,f)
+
+    def create_qa_room(self,user_name,room_name):
+        """Create a new QA chat room"""
+        room_id=f"QA-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+
+        room_data={
+            "id":room_id,
+            "name":room_name,
+            "created_at":datetime.now().isoformat(),
+            "creator":user_name,
+            "message":[]
+
+        }
+        welcome_message={
+            "id":str(uuid.uuid4()),
+            "user":"Report QA System",
+            "content":f"Welcome to the Report QA room: {room_name}. You can ask question about your medical report and I'll try to answer based on the analyses stored in the system.",
+            "timestamp":datetime.now().isoformat()
+        }
+        room_data["message"].append(welcome_message)
+
+        self.qa_chat_store["room"][room_id]=room_data
+        self.save_qa_chat_store()
+
+        return room_id
+    
+
+    def add_message(self,room_id,user_name,message):
+        """"Add a message to a QA room"""
+
+        if room_id not in self.qa_chat_store["room"]:
+            return None
+        
+        message_data={
+            "id":str(uuid.uuid4()),
+            "user":user_name,
+            "content":message,
+            "timestamp":datetime.now().isoformat()
+        }
+
+        self.qa_chat_store["room"][room_id]["message"].append(message_data)
+        self.save_qa_chat_store()
+
+        return message_data
+    
+
+    def get_message(self,room_id,limit=50):
+        """Get the most recent message from a QA room"""
+        if room_id not in self.qa_chat_store["rooms"]:
+            return []
+        
+        message=self.qa_chat_stire["room"][room_id]["message"]
+        return message[-limit] if len(message)>limit else message
+    
+    def get_qa_rooms(self):
+        """Get all QA rooms"""
+        rooms=[]
+        for room_id,room_data in self.qa_chat_store["rooms"].items:
+            rooms.append({
+                "id":room_id,
+                "name":room_data.get("name","Unnamed Room"),
+                "creator":room_data.get("creator","Unknown"),
+                "created_at":room_data.get("created_at","")
+            })
+
+        rooms.sort(key=lambda x:x["created_at"],reverse=True)
+        return rooms
+    
+
+    def delete_qa_room(self,room_id):
+        """Delete a QA chat room"""
+        if room_id in self.qa_chat_store["rooms"]:
+            del self.qa_chat_store["rooms"][room_id]
+            self.save_qa_chat_store()
+            return True
+        return False
+    
+
+
+    
         
