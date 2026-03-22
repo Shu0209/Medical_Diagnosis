@@ -35,49 +35,6 @@ class ReportQASystem:
 
             return np.random.rand(1536)
         
-    
-    def get_relevant_contexts(self,query,top_k=3):
-        query_embedding=self.get_embeddings(query)
-
-        analyses=self.analysis_store["analyses"]
-        contexts=[]
-
-        if not analyses:
-            return ["No previous analyses found."]
-        
-        for analysis in analyses:
-            analysis_text=analysis.get("analysis","")
-            if not analysis_text.strip():
-                continue
-
-            full_text=analysis_text
-            if "finding" in analysis and analysis["findings"]:
-                findings_text="\n".join([f"- {finding}" for finding in analysis["findings"]])
-                full_text+=f"\n\nFindings:\n{findings_text}"
-
-            full_text+=f"\n\nImage: {analysis.get('filename','unknown')}"
-            full_text+=f"\nDate: {analysis.get('date','')[:10]}"
-
-            contexts.append({
-                "text":full_text,
-                "embedding":self.get_embeddings(full_text),
-                "id":analysis.get("id", ""),
-                "date":analysis.get("date","")
-            })
-
-            similarities=[]
-            for context in contexts:
-                similarity=cosine_similarity(
-                    [query_embedding],
-                    [context["embedding"]]
-                )[0][0]
-                similarities.append((similarity,context))
-
-            similarities.sort(reverse=True)
-            top_contexts=[context["text"] for _, context in similarities[:top_k]]
-
-            return top_contexts
-        
 
 
     def get_relevant_contexts(self, query, top_k=3):
@@ -186,7 +143,7 @@ class ReportQAChat:
         if os.path.exists("qa_chat_store.json"):
             with open("qa_chat_store.json","r") as f:
                 return json.load(f)
-        return {"room":{}}
+        return {"rooms":{}}
     
     def save_qa_chat_store(self):
         """Save the QA chat storage"""
@@ -213,7 +170,7 @@ class ReportQAChat:
         }
         room_data["message"].append(welcome_message)
 
-        self.qa_chat_store["room"][room_id]=room_data
+        self.qa_chat_store["rooms"][room_id]=room_data
         self.save_qa_chat_store()
 
         return room_id
@@ -243,13 +200,13 @@ class ReportQAChat:
         if room_id not in self.qa_chat_store["rooms"]:
             return []
         
-        message=self.qa_chat_stire["room"][room_id]["message"]
-        return message[-limit] if len(message)>limit else message
+        message=self.qa_chat_store["room"][room_id]["message"]
+        return message[-limit:] if len(message)>limit else message
     
     def get_qa_rooms(self):
         """Get all QA rooms"""
         rooms=[]
-        for room_id,room_data in self.qa_chat_store["rooms"].items:
+        for room_id, room_data in self.qa_chat_store["rooms"].items():
             rooms.append({
                 "id":room_id,
                 "name":room_data.get("name","Unnamed Room"),
@@ -257,7 +214,7 @@ class ReportQAChat:
                 "created_at":room_data.get("created_at","")
             })
 
-        rooms.sort(key=lambda x:x["created_at"],reverse=True)
+        rooms.sort(key=lambda x: x["created_at"],reverse=True)
         return rooms
     
 

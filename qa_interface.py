@@ -9,7 +9,7 @@ def render_qa_chat_interface():
 
     if "qa_system" not in st.session_state:
         api_key=st.session_state.get("OPENAI_API_KEY", st.session_state.get("openai_key",None))
-        st.session_state.qa_system=ReportQAChat(api_key=api_key)
+        st.session_state.qa_system=ReportQASystem(api_key=api_key)
 
     if "qa_chat" not in st.session_state:
         st.session_state.qa_chat=ReportQAChat()
@@ -107,15 +107,4 @@ def render_qa_chat_interface():
             if st.button("Return to Room selection",key="back_qa_btn"):
                 del st.session_state.current_qa_id
                 st.rerun()
-                
-
-
-
-
-
-
-
-
-
-
-
+        

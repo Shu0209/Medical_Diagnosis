@@ -292,7 +292,7 @@ def get_analysis_store():
     if os.path.exists("analysis_store.json"):
         with open("analysis_store.json","r") as f:
             return json.load(f)
-        return{"ans;yses":[]}
+    return{"analyses":[]}
     
 def save_analysis(analysis_data,filename="unknown.jpg"):
     store=get_analysis_store()
@@ -324,7 +324,7 @@ def get_latest_analyses(limit=5):
 
     #Sort by date (newest first)
     sorted_analyses=sorted(store["analyses"],
-                           key=lambda x:x.get("date",""),
+                           key=lambda x: x.get("date",""),
                            reverse=True)
     
 
@@ -377,7 +377,7 @@ def genrate_statistics_report():
     #Overall statistics
 
     content.append(Paragraph("Overall Statistics", styles["Heading2"]))
-    content.append(Paragraph(f"Total analysis: {len(store["analyses"])}",styles["Normal"]))
+    content.append(Paragraph(f"Total analysis: {len(store['analyses'])}",styles["Normal"]))
     content.append(Spacer(1,12))
 
     #Analysis type

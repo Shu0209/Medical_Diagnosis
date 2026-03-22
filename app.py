@@ -35,7 +35,7 @@ if "openai_key" not in st.session_state:
 if "file_data" not in st.session_state:
     st.session_state.file_data=None
 if "analysis_result" not in st.session_state:
-    st.session_state.analysis_result=None
+    st.session_state.analysis_results=None
 if "file_name" not in st.session_state:
     st.session_state.file_name=None
 if "file_type" not in st.session_state:
@@ -153,7 +153,7 @@ with tab1:
                         st.markdown(href,unsafe_allow_html=True)
 
                         st.subheader("Collaborate")
-                        col1,col2=st.columns(2)
+                        col1,col2=st.column(2)
 
                         with col1:
                             if st.button("Start Case Discussion"):
@@ -187,7 +187,7 @@ with tab1:
 
     elif "analysis_result" in st.session_state and st.session_state.analysis_results:
         st.subheader("Previous Analysis Results")
-        st.markdown(st.session_state.analysis_result["analysis"])
+        st.markdown(st.session_state.analysis_results["analysis"])
 
         if "findings" in st.session_state.analysis_results:
             st.subheader("Key Findings")
@@ -203,6 +203,92 @@ with tab1:
             href=f'<a href="data:application/pdf;base64,{b64_pdf}" download="medical_report_{datetime.now().strftime("%Y%m%d")}.pdf">Download PDF Report</a>'
             st.markdown(href, unsafe_allow_html=True)
 with tab2:
+    #Chat Interface 
+    try:
+        render_chat_interface()
+    except Exception as e:
+        st.error(f"Error in chat interface: {str(e)}")
+        st.info("If you're trying to create a new discussion, please upload and analyze an image first.")
+
+        st.subheader("Create Discussion Without Image")
+        manual_creator=st.text_input("Your Name", value="Dr. Anonymous")
+        manual_description=st.text_input("Case Discussion")
+
+        if st.button("Create Manual Discussion") and manual_description:
+            case_id=create_manual_chat_room(manual_creator, manual_description)
+            st.session_state.current_case_id=case_id
+            st.rerun()
+
+with tab3:
+    # Q&A Interface
+    render_qa_chat_interface()
+
+
+with tab4:
+
+    st.subheader("Medical Report & Analytics")
+
+    #Analysis history
+    st.markdown("### Analysis History")
+    recent_analyses=get_latest_analyses(limit=10)
+
+    if recent_analyses:
+        for idx, analyses in enumerate(recent_analyses,1):
+            with st.expender(f"{idx}. {analysis.get('filename','Unknown')}-{analysis.get('date','')[:10]}"):
+                st.markdown(analysis.get("analysis","No analysis available"))
+
+                if analysis.get("findings"):
+                    st.markdown("**Key Findings:**")
+                    for finding_idx, finding in enumerate(analysis["findings"],1):
+                        st.markdown(f"{finding_idx}.{finding}")
+                    col1, col2=st.columns(2)
+
+                    with col1:
+                        if st.button(f"Genrate Report #{idx}"):
+                            pdf_buffer=generate_report(analysis,include_references=include_references)
+
+                            b64_pdf=base64.b64encode(pdf_buffer.read()).decode()
+                            report_name=f"report_{analysis.get('id','unknown')[:8]}.pdf"
+                            href=f'<a href="data:application/pdf;base64,{b64_pdf}"download="{report_name}">Download Report</a>'
+                            st.markdown(href,unsafe_allow_html=True)
+
+                    
+                    with col2:
+                        if st.button(f"Q&A on Report #{idx}"):
+                            if "qa_chat" not in st.session_state:
+                                st.session_state.qa_chat=ReportQAChat()
+
+                            report_name=f"Q&A for {analysis.get('filename','Unknown')}"
+                            create_qa_id=st.session_state.qa_chat.create_qa_room("Dr. Anonymous", report_name)
+                            st.session_state.current_qa_id
+
+
+                            st.rerun()
+    
+
+    else:
+        st.info("No previous analyses found. Upload and analyze an image to get started.")
+
+
+    #Statistics section
+    st.markdown("### Statistics")
+
+    if st.button("Generate Comprehensive Statistics"):
+        stats_report=genrate_statistics_report()
+        if stats_report:
+            #Create download link
+            b64_pdf=base64.b64encode(stats_report.read()).decode()
+            href=f'<a href="data:application/pdf;base64.{b64_pdf}"download=statistics_report.pdf">Download Statistics Report</a>'
+            st.markdown(href,unsafe_allow_html=True)
+
+
+
+
+
+
+
+
+
     
 
 
