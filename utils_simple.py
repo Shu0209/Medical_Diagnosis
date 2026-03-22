@@ -136,7 +136,7 @@ def analyze_image(image, api_key, enable_xai=True):
         analysis=response.choices[0].message.content
 
         #Extract findings and keywords
-        findings,keywords=extract_findings_and_keywords(analysis)
+        findings, keywords=extract_findings_and_keywords(analysis)
 
         return{
             "id":str(uuid.uuid4()),
@@ -150,8 +150,8 @@ def analyze_image(image, api_key, enable_xai=True):
         return{
             "id":str(uuid.uuid4()),
             "analysis":f"Error analyzing image:{str(e)}",
-            "findings":findings,
-            "keywords":keywords,
+            "findings":[],
+            "keywords":[],
             "date":datetime.now().isoformat()
         }
     
@@ -220,7 +220,7 @@ def generate_report(data,include_references=True):
     #Custom style
     title_style=ParagraphStyle(
         'Title',
-        parent=styles['heading1'],
+        parent=styles['Heading1'],
         fontSize=18,
         spaceAfter=12
     )
@@ -254,7 +254,7 @@ def generate_report(data,include_references=True):
     #Key Finding
     if data.get('findings'):
         content.append(Paragraph("Key Finding",subtitle_style))
-        for idx, finding in enumerate(data['finding'],1):
+        for idx, finding in enumerate(data['findings'],1):
             content.append(Paragraph(f"{idx}.{finding}",styles["Normal"]))
         content.append(Spacer(1,12))
     #Keywords
@@ -265,7 +265,7 @@ def generate_report(data,include_references=True):
 
     # Add references if available and requested
     if include_references:
-        pubmed_results=search_pubmed(data.get('keyword',[]),max_results=3)
+        pubmed_results=search_pubmed(data.get('keywords',[]),max_results=3)
         if pubmed_results:
             content.append(Paragraph("Relevant Medical Literature",subtitle_style))
             for ref in pubmed_results:
@@ -274,7 +274,7 @@ def generate_report(data,include_references=True):
             content.append(Spacer(1,12))
 
         #Search clinical trials
-        trial_results=search_clinical_trials(data.get('keywords',[]),max_result=2)
+        trial_results=search_clinical_trials(data.get('keywords',[]),max_results=2)
         if trial_results:
             content.append(Paragraph("Related Clinical Trials",subtitle_style))
             for trial in trial_results:
@@ -313,7 +313,7 @@ def save_analysis(analysis_data,filename="unknown.jpg"):
 def get_analysis_by_id(analysis_id):
     store=get_analysis_store()
 
-    for analysis in store["analysis"]:
+    for analysis in store["analyses"]:
         if analysis["id"]==analysis_id:
             return analysis
         

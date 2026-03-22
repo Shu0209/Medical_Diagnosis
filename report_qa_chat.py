@@ -90,18 +90,34 @@ class ReportQASystem:
 
 
     def answer_question(self, question):
+        if not self.api_key:
+            return "Please provide an OpenAI API key to enable the QA system."
+        
+        contexts=self.get_relevant_contexts(question)
+        if not contexts or contexts[0]=="No previous analysis found.":
+            return "I don't have any medical reports to references. Please upload and analyze some image first."
+        
+        combined_context="\n\n---\n\n".join(contexts)
+
+        self.conversation_history.append({"role":"user","content":question})
+
         try:
             client = openai.OpenAI(api_key=self.api_key)
 
-            # Add user question to history
-            self.conversation_history.append({
-                "role": "user",
-                "content": question
-            })
+
+            system_prompt=f"""You are a medical AI assistant answering questions about medical reports.
+            Use the following medical report context to nswer the question. If the answer cannot be found in the contexts, say so and suggest what other information might be needed.
+
+            Contexts:
+            {combined_context}
+            """
+
+           
 
             messages = [
-                {"role": "system", "content": "You are a helpful medical report assistant."}
-            ] + self.conversation_history
+                {"role":"system","content":system_prompt},
+                *self.conversation_history
+            ]
 
             response = client.chat.completions.create(
                 model="gpt-3.5-turbo",
@@ -159,7 +175,7 @@ class ReportQAChat:
             "name":room_name,
             "created_at":datetime.now().isoformat(),
             "creator":user_name,
-            "message":[]
+            "messages":[]
 
         }
         welcome_message={
@@ -168,7 +184,7 @@ class ReportQAChat:
             "content":f"Welcome to the Report QA room: {room_name}. You can ask question about your medical report and I'll try to answer based on the analyses stored in the system.",
             "timestamp":datetime.now().isoformat()
         }
-        room_data["message"].append(welcome_message)
+        room_data["messages"].append(welcome_message)
 
         self.qa_chat_store["rooms"][room_id]=room_data
         self.save_qa_chat_store()
@@ -179,7 +195,7 @@ class ReportQAChat:
     def add_message(self,room_id,user_name,message):
         """"Add a message to a QA room"""
 
-        if room_id not in self.qa_chat_store["room"]:
+        if room_id not in self.qa_chat_store["rooms"]:
             return None
         
         message_data={
@@ -189,7 +205,7 @@ class ReportQAChat:
             "timestamp":datetime.now().isoformat()
         }
 
-        self.qa_chat_store["room"][room_id]["message"].append(message_data)
+        self.qa_chat_store["rooms"][room_id]["messages"].append(message_data)
         self.save_qa_chat_store()
 
         return message_data
@@ -200,7 +216,7 @@ class ReportQAChat:
         if room_id not in self.qa_chat_store["rooms"]:
             return []
         
-        message=self.qa_chat_store["room"][room_id]["message"]
+        message=self.qa_chat_store["rooms"][room_id]["messages"]
         return message[-limit:] if len(message)>limit else message
     
     def get_qa_rooms(self):

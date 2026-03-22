@@ -34,7 +34,7 @@ if "openai_key" not in st.session_state:
     st.session_state.openai_key=""
 if "file_data" not in st.session_state:
     st.session_state.file_data=None
-if "analysis_result" not in st.session_state:
+if "analysis_results" not in st.session_state:
     st.session_state.analysis_results=None
 if "file_name" not in st.session_state:
     st.session_state.file_name=None
@@ -113,7 +113,7 @@ with tab1:
                         analysis_results=save_analysis(analysis_results,filename=uploaded_file.name)
 
 
-                        st.session_state.analysis_result=analysis_results
+                        st.session_state.analysis_results=analysis_results
                         st.session_state.findings=analysis_results.get("findings",[])
 
                         st.subheader("Analysis Result")
@@ -132,7 +132,7 @@ with tab1:
                         if enable_xai:
                             st.subheader("Explainable AI Visualization")
                             overlay,heatmap=generate_heatmap(file_data["array"])
-                            col1,col2=st.column(2)
+                            col1,col2=st.columns(2)
                             with col1:
                                 st.image(overlay,caption="Heatmap Overlay",use_column_width=True)
                             with col2:
@@ -142,7 +142,7 @@ with tab1:
                             st.subheader("relevant Medical Literature")
                             references=search_pubmed(analysis_results["keywords"], max_results=3)
                             for ref in references:
-                                st.markdown(f"-**{ref['title']}** \n{ref['journal']}.{ref['year']}(PMID: {ref['if']})")
+                                st.markdown(f"-**{ref['title']}** \n{ref['journal']}.{ref['year']}(PMID: {ref['id']})")
 
                         st.subheader("Report Generation")
                         pdf_buffer=generate_report(analysis_results,include_references=include_references)
@@ -153,7 +153,7 @@ with tab1:
                         st.markdown(href,unsafe_allow_html=True)
 
                         st.subheader("Collaborate")
-                        col1,col2=st.column(2)
+                        col1,col2=st.columns(2)
 
                         with col1:
                             if st.button("Start Case Discussion"):
@@ -185,7 +185,7 @@ with tab1:
         except Exception as e:
             st.error(f"Error processing file: {str(e)}")
 
-    elif "analysis_result" in st.session_state and st.session_state.analysis_results:
+    elif "analysis_results" in st.session_state and st.session_state.analysis_results:
         st.subheader("Previous Analysis Results")
         st.markdown(st.session_state.analysis_results["analysis"])
 
@@ -233,8 +233,8 @@ with tab4:
     recent_analyses=get_latest_analyses(limit=10)
 
     if recent_analyses:
-        for idx, analyses in enumerate(recent_analyses,1):
-            with st.expender(f"{idx}. {analysis.get('filename','Unknown')}-{analysis.get('date','')[:10]}"):
+        for idx, analysis in enumerate(recent_analyses,1):
+            with st.expander(f"{idx}. {analysis.get('filename','Unknown')}-{analysis.get('date','')[:10]}"):
                 st.markdown(analysis.get("analysis","No analysis available"))
 
                 if analysis.get("findings"):
@@ -260,7 +260,7 @@ with tab4:
 
                             report_name=f"Q&A for {analysis.get('filename','Unknown')}"
                             create_qa_id=st.session_state.qa_chat.create_qa_room("Dr. Anonymous", report_name)
-                            st.session_state.current_qa_id
+                            st.session_state.current_qa_id=create_qa_id
 
 
                             st.rerun()
@@ -278,40 +278,7 @@ with tab4:
         if stats_report:
             #Create download link
             b64_pdf=base64.b64encode(stats_report.read()).decode()
-            href=f'<a href="data:application/pdf;base64.{b64_pdf}"download=statistics_report.pdf">Download Statistics Report</a>'
+            href=f'<a href="data:application/pdf;base64,{b64_pdf}"download=statistics_report.pdf">Download Statistics Report</a>'
             st.markdown(href,unsafe_allow_html=True)
-
-
-
-
-
-
-
-
-
-    
-
-
-
-
-
-
-
-                                
-                            
-
-
-
-
-
-
-
-
-
-
-
-    
-
-
 
 

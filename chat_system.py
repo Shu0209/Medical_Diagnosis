@@ -42,7 +42,7 @@ def create_chat_room(case_id, creator_name, case_description):
             "type":"text",
             "timestamp":datetime.now().isoformat()
         }
-        room_data["message"].append(welcome_message)
+        room_data["messages"].append(welcome_message)
 
         store["rooms"][case_id]=room_data
         save_chat_store(store)
@@ -73,7 +73,7 @@ def add_message(case_id, user_name, message, message_type="text"):
             "type":message_type,
             "timestamp":datetime.now().isoformat()
         }
-        store["rooms"][case_id]["message"].append(message_data)
+        store["rooms"][case_id]["messages"].append(message_data)
         save_chat_store(store)
         return message_data
     
@@ -217,7 +217,7 @@ def render_chat_interface():
                     if doctor_response:
                         doctor_name=st.selectbox("Select Doctor",["Dr. Johnson (Cardiologist)","Dr. Chen (Pulmonologist)","Dr. Patel (Radiologist)"])
                     
-                    doctor_name=doctor_name.split(" (")[0]
+                        doctor_name=doctor_name.split(" (")[0]
         #Display messages
         messages=get_messages(case_id)
 
@@ -242,7 +242,7 @@ def render_chat_interface():
                     time.sleep(1)
 
                     #Get finding if available
-                    findings=st.session_state.get("finding", None)
+                    findings=st.session_state.get("findings", None)
 
                     #Get API key from session state
                     api_key=st.session_state.get("OPENAI_API_KEY",None)

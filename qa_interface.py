@@ -61,7 +61,7 @@ def render_qa_chat_interface():
 
         if current_room:
             st.subheader(f"Q&A Room:{current_room['name']}")
-            st.caption(f"Created by {current_room['creator']} on {current_room['created_at[:10]']}")
+            st.caption(f"Created by {current_room['creator']} on {current_room['created_at'][:10]}")
 
 
             if st.button("Clear Conversation History", key="clear_qa_hist"):
@@ -81,7 +81,7 @@ def render_qa_chat_interface():
             if qa_message:
                 st.session_state.qa_chat.add_message(qa_id,user_name,qa_message)
 
-                api_key=st.session_state.get("Open_API_KEY",st.session_state.get("openai_key",None))
+                api_key=st.session_state.get("OPENAI_API_KEY",st.session_state.get("openai_key",None))
 
                 if api_key !=st.session_state.qa_system.api_key:
                     st.session_state.qa_system.api_key=api_key
