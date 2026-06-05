@@ -46,7 +46,7 @@ class ReportQASystem:
         if not analyses:
             return ["No previous analyses found."]
 
-        # Build contexts
+        
         for analysis in analyses:
             analysis_text = analysis.get("analysis", "")
             if not analysis_text.strip():
@@ -128,13 +128,13 @@ class ReportQASystem:
 
             answer = response.choices[0].message.content
 
-            # Save assistant reply
+        
             self.conversation_history.append({
                 "role": "assistant",
                 "content": answer
             })
 
-            # Keep only last 10 messages
+            
             if len(self.conversation_history) > 10:
                 self.conversation_history = self.conversation_history[-10:]
 

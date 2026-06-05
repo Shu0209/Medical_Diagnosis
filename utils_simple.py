@@ -24,7 +24,7 @@ Entrez.email="your_email@example.com"
 
 
 
-# Upload Document
+
 def process_file(uploaded_file):
     ext=uploaded_file.name.split('.')[-1].lower()
 
@@ -53,7 +53,7 @@ def process_file(uploaded_file):
         os.remove(temp_path)
         return {"type":"nifti","data":Image.fromarray(img_array),"array":img_array}
     
-# Heatmap
+
 def generate_heatmap(image_array):
     if len(image_array.shape)==3:
         gray_image=cv2.cvtColor(image_array,cv2.COLOR_RGB2GRAY)
@@ -101,7 +101,7 @@ def extract_findings_and_keywords(analysis_text):
 
     return findings, keywords[:5]
 
-# Analysis
+
 
 def analyze_image(image, api_key, enable_xai=True):
 
@@ -120,7 +120,7 @@ def analyze_image(image, api_key, enable_xai=True):
             Format your response with "Radiological Analysis" and "Impression" sections.
             """
     
-    #Make API call
+   
     try:
         response=client.chat.completions.create(
             model="gpt-4-turbo",
@@ -135,7 +135,7 @@ def analyze_image(image, api_key, enable_xai=True):
 
         analysis=response.choices[0].message.content
 
-        #Extract findings and keywords
+        
         findings, keywords=extract_findings_and_keywords(analysis)
 
         return{
@@ -201,7 +201,7 @@ def search_pubmed(keywords, max_results=5):
                  "journal":"Medical Journal",
                  "year":"2024"} for i in range(min(3, max_results)) ]
     
-# Clinical Trials
+
 def search_clinical_trials(keywords, max_results=3):
     if not keywords:
         return []
@@ -217,7 +217,7 @@ def generate_report(data,include_references=True):
     doc=SimpleDocTemplate(buffer,pagesize=letter)
     styles=getSampleStyleSheet()
 
-    #Custom style
+  
     title_style=ParagraphStyle(
         'Title',
         parent=styles['Heading1'],
@@ -232,38 +232,38 @@ def generate_report(data,include_references=True):
         spaceAfter=8
     )
 
-    #Build content
+    
     content=[]
 
-    #Header
+
     content.append(Paragraph("Medical Imaging Analysis Report", title_style))
     content.append(Spacer(1,12))
 
-    #Date and ID
+ 
     content.append(Paragraph(f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M')}",styles["Normal"]))
     content.append(Paragraph(f"Report ID:{data['id']}",styles["Normal"]))
     if 'filename' in data:
         content.append(Paragraph(f"Image: {data['filename']}",styles["Normal"]))
     content.append(Spacer(1,12))
 
-    #Analysis
+ 
     content.append(Paragraph("Analysis Result", subtitle_style))
     content.append(Paragraph(data['analysis'],styles["Normal"]))
     content.append(Spacer(1,12))
 
-    #Key Finding
+   
     if data.get('findings'):
         content.append(Paragraph("Key Finding",subtitle_style))
         for idx, finding in enumerate(data['findings'],1):
             content.append(Paragraph(f"{idx}.{finding}",styles["Normal"]))
         content.append(Spacer(1,12))
-    #Keywords
+
     if data.get('keywords'):
         content.append(Paragraph("Keywords",subtitle_style))
         content.append(Paragraph(f"{', '.join(data['keywords'])}",styles["Normal"]))
         content.append(Spacer(1,12))
 
-    # Add references if available and requested
+    
     if include_references:
         pubmed_results=search_pubmed(data.get('keywords',[]),max_results=3)
         if pubmed_results:
@@ -273,7 +273,7 @@ def generate_report(data,include_references=True):
                 content.append(Paragraph(f" {ref['journal']},{ref['year']}(PMID:{ref['id']})",styles["Normal"]))
             content.append(Spacer(1,12))
 
-        #Search clinical trials
+      
         trial_results=search_clinical_trials(data.get('keywords',[]),max_results=2)
         if trial_results:
             content.append(Paragraph("Related Clinical Trials",subtitle_style))
@@ -282,7 +282,7 @@ def generate_report(data,include_references=True):
                 content.append(Paragraph(f" ID:{trial['id']},Status:{trial['status']}",styles["Normal"]))
 
 
-    #Build the PDF
+   
     doc.build(content)
     buffer.seek(0)
     return buffer
@@ -297,13 +297,13 @@ def get_analysis_store():
 def save_analysis(analysis_data,filename="unknown.jpg"):
     store=get_analysis_store()
 
-    #Add filename to analysis data
+   
     analysis_data["filename"]=filename
 
-    #Add to store
+   
     store["analyses"].append(analysis_data)
 
-    #Save back to file
+    
     with open("analysis_store.json","w") as f:
         json.dump(store,f)
     return analysis_data
@@ -322,7 +322,7 @@ def get_analysis_by_id(analysis_id):
 def get_latest_analyses(limit=5):
     store=get_analysis_store()
 
-    #Sort by date (newest first)
+ 
     sorted_analyses=sorted(store["analyses"],
                            key=lambda x: x.get("date",""),
                            reverse=True)
@@ -341,7 +341,7 @@ def extract_common_findings():
             else:
                 keyword_counts[keyword]=1
 
-    #Sort by Frequency
+  
     sorted_keywords=sorted(keyword_counts.items(),key=lambda x:x[1],reverse=True)
 
     return sorted_keywords
@@ -360,27 +360,27 @@ def genrate_statistics_report():
         else:
             type_counts[analysis_type]=1
 
-    # Get common findings
+   
     common_findings=extract_common_findings()
 
-    #Create report
+   
     buffer=io.BytesIO()
     doc=SimpleDocTemplate(buffer, pagesize=letter)
     styles=getSampleStyleSheet()
 
     content=[]
 
-    #Title
+  
     content.append(Paragraph("Medical Imaging Statistics Report",styles["Title"]))
     content.append(Spacer(1,12))
 
-    #Overall statistics
+   
 
     content.append(Paragraph("Overall Statistics", styles["Heading2"]))
     content.append(Paragraph(f"Total analysis: {len(store['analyses'])}",styles["Normal"]))
     content.append(Spacer(1,12))
 
-    #Analysis type
+
     if type_counts:
         content.append(Paragraph("Analysis Types",styles["Heading2"]))
         for type_name, count in type_counts.items():
@@ -388,13 +388,13 @@ def genrate_statistics_report():
 
         content.append(Spacer(1,12))
 
-    #Common finding
+   
     if common_findings:
         content.append(Paragraph("Common Finding", styles["Heading2"]))
         for keyword, count in common_findings[:10]:
             content.append(Paragraph(f"{keyword.capitalize()}: {count} occurrences",styles["Normal"]))
 
-    #Build the PDF
+
     doc.build(content)
     buffer.seek(0)
     return buffer

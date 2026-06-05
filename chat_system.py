@@ -34,7 +34,7 @@ def create_chat_room(case_id, creator_name, case_description):
             "messages":[]
         }
 
-        #Welcome Message
+       
         welcome_message={
             "id":str(uuid.uuid4()),
             "user":"Dr. AI Assistant",
@@ -109,15 +109,15 @@ def get_openai_response(user_question, case_description, findings=None,api_key=N
     if not api_key:
         return "Please configure your OpenAI API key in the sidebar to get AI responses."
     
-    #Set ip OpenAI client
+   
     client=openai.OpenAI(api_key=api_key)
 
-    #Create the findings text if available
+    
     findings_text=""
     if findings and len(findings)>0:
         findings_text="The key findings in the image are:\n"
 
-    # Create system prompt with medical context
+    
     system_prompt=f"""You are Dr. AI Assistant, a medical specialist analyzing a medical image.
     The image is from a case described as:"{case_description}".
     {findings_text}
@@ -128,7 +128,7 @@ def get_openai_response(user_question, case_description, findings=None,api_key=N
     """
 
     try:
-        #Make API call
+       
         response=client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
@@ -172,7 +172,7 @@ def render_chat_interface():
             st.info("No active case discussions. Create a new one!")
 
     with tab2:
-        #Create a new chat room
+       
         case_description=st.text_input("Case Description")
 
         can_create_discussion="file_data" in st.session_state and "file_type" in st.session_state and st.session_state.file_type is not None
@@ -218,7 +218,7 @@ def render_chat_interface():
                         doctor_name=st.selectbox("Select Doctor",["Dr. Johnson (Cardiologist)","Dr. Chen (Pulmonologist)","Dr. Patel (Radiologist)"])
                     
                         doctor_name=doctor_name.split(" (")[0]
-        #Display messages
+        
         messages=get_messages(case_id)
 
         chat_container=st.container()
@@ -234,20 +234,20 @@ def render_chat_interface():
 
         messages=st.chat_input("Type your message here")
         if messages:
-            #add user message
+            
             add_message(case_id,user_name,messages)
 
             if get_ai_response:
                 with st.spinner("AI Assistant is analyzing..."):
                     time.sleep(1)
 
-                    #Get finding if available
+                    
                     findings=st.session_state.get("findings", None)
 
-                    #Get API key from session state
+                    
                     api_key=st.session_state.get("OPENAI_API_KEY",None)
 
-                    #Generate and add AI response using OpenAI
+                    
                     ai_response=get_openai_response(messages,room_data["description"], findings, api_key)
                     add_message(case_id,"Dr. AI Assistant", ai_response)
 
@@ -255,7 +255,7 @@ def render_chat_interface():
                 with st.spinner(f"{doctor_name} is typing..."):
                     time.sleep(1)
                 
-                #Simple doctor response generation
+                
                 doctor_response={
                     "Dr. Johnson":"From a cardiac perspective, I'd want to rule out any cardiac involvement. The mild cardiomegaly noted in the image warrants further cardiac workup, possibly an echocardiogram.",
                     "Dr. Chen":"These infiltrates have a distribution pattern typicaly of atpical pneumonia. I'd recommend a sputum culture and respiratory pathogen panel to identify the causative agent.",
@@ -267,7 +267,7 @@ def render_chat_interface():
 
             st.rerun()
 
-        #Annotation option
+        
         with st.expander("Add Image Annotation"):
             annotation=st.text_area("Describe what you see in the image")
             if st.button("Submit Annotation"):
@@ -275,7 +275,7 @@ def render_chat_interface():
                 st.rerun()
 
     else:
-        #Handle where room no longer exists
+        
         st.error("This case discussion no longer exists")
         if st.button("Return to Room Selection"):
             del st.session_state.current_case_id

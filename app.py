@@ -76,7 +76,7 @@ with st.sidebar:
     if st.button("Genrate Statistics Report"):
         stats_report=genrate_statistics_report()
         if stats_report:
-            #Create Download Link
+            
             b64_pdf=base64.b64encode(stats_report.read()).decode()
             href=f'<a href="data:application/pdf;base64,{b64_pdf}"download="statistics_report.pdf">Download Statistics Report</a>'
             st.markdown(href, unsafe_allow_html=True)
@@ -85,7 +85,7 @@ with st.sidebar:
 tab1, tab2, tab3, tab4=st.tabs(["Image Upload & Analysis","Collaboration","Report Q&A","Reports"])
 
 with tab1:
-    #File Uploader
+   
     uploaded_file=st.file_uploader(
         "Upload a medical image (JPEG, PNG, DICOM, NIfTI)",
         type=["jpg","jpeg","png","dcm","nii","nii.gz"]
@@ -203,7 +203,7 @@ with tab1:
             href=f'<a href="data:application/pdf;base64,{b64_pdf}" download="medical_report_{datetime.now().strftime("%Y%m%d")}.pdf">Download PDF Report</a>'
             st.markdown(href, unsafe_allow_html=True)
 with tab2:
-    #Chat Interface 
+    
     try:
         render_chat_interface()
     except Exception as e:
@@ -220,7 +220,7 @@ with tab2:
             st.rerun()
 
 with tab3:
-    # Q&A Interface
+   
     render_qa_chat_interface()
 
 
@@ -228,7 +228,7 @@ with tab4:
 
     st.subheader("Medical Report & Analytics")
 
-    #Analysis history
+  
     st.markdown("### Analysis History")
     recent_analyses=get_latest_analyses(limit=10)
 
@@ -270,13 +270,13 @@ with tab4:
         st.info("No previous analyses found. Upload and analyze an image to get started.")
 
 
-    #Statistics section
+    
     st.markdown("### Statistics")
 
     if st.button("Generate Comprehensive Statistics"):
         stats_report=genrate_statistics_report()
         if stats_report:
-            #Create download link
+           
             b64_pdf=base64.b64encode(stats_report.read()).decode()
             href=f'<a href="data:application/pdf;base64,{b64_pdf}"download=statistics_report.pdf">Download Statistics Report</a>'
             st.markdown(href,unsafe_allow_html=True)
