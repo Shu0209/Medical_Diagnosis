@@ -1,399 +1,462 @@
 import io
 import base64
-import uuid
-import numpy as np
-import cv2
-import matplotlib.pyplot as plt
-from PIL import Image
-from datetime import datetime
-from reportlab.lib import colors
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RPImage, Table
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+import logging
 import os
-import requests
-from io import BytesIO
+import uuid
+
+import cv2
+import nibabel as nib
+import numpy as np
 import pydicom
-import nibabel as nib 
-from Bio import Entrez
-import openai
+from Bio import Entrez, Medline
+from datetime import datetime
+from PIL import Image
 from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
 import json
 
+from openrouter_client import call_openrouter, call_vision, OPENROUTER_MODEL
+from prompt import ANALYSIS_PROMPT
 
-Entrez.email="your_email@example.com"
+logger = logging.getLogger(__name__)
 
 
+
+def _get_ncbi_email() -> str:
+    """Read NCBI email from env or Streamlit secrets. Warns loudly if missing."""
+    email = os.getenv("NCBI_EMAIL", "")
+    if not email:
+        try:
+            import streamlit as st
+            email = st.secrets.get("NCBI_EMAIL", "")
+        except Exception:
+            pass
+    if not email:
+        logger.warning(
+            "NCBI_EMAIL is not set. PubMed searches may be blocked by NCBI. "
+            "Set the NCBI_EMAIL environment variable or add it to .streamlit/secrets.toml."
+        )
+        email = "noreply@example.com"
+    return email
+
+
+Entrez.email = _get_ncbi_email()
+
+NCBI_EMAIL_CONFIGURED = bool(Entrez.email) and Entrez.email != "noreply@example.com"
+
+
+# File processing
+
+def _safe_normalise(arr: np.ndarray) -> np.ndarray:
+    """Normalise array to uint8 [0, 255], guarding against zero range."""
+    rng = float(arr.max()) - float(arr.min())
+    if rng == 0:
+        return np.zeros_like(arr, dtype=np.uint8)
+    return ((arr - arr.min()) / rng * 255).astype(np.uint8)
 
 
 def process_file(uploaded_file):
-    ext=uploaded_file.name.split('.')[-1].lower()
+    """
+    Parse an uploaded medical image file and return a dict with:
+        type   : 'image' | 'dicom' | 'nifti'
+        data   : PIL.Image (RGB)
+        array  : np.ndarray (uint8, HxW or HxWx3)
+    Returns None if the extension is unrecognised.
+    """
+    name = uploaded_file.name.lower()
 
-    if ext in ['jpg','jpeg','png']:
-        image=Image.open(uploaded_file).convert('RGB')
-        return {"type":"image","data":image,"array":np.array(image)}
-    
-    elif ext=='dcm':
-        dicom=pydicom.dcmread(uploaded_file)
-        img_array=dicom.pixel_array
-        img_array=((img_array-img_array.min())/(img_array.max()-img_array.min())*255).astype(np.uint8)
-        
+    if name.endswith((".jpg", ".jpeg", ".png")):
+        image = Image.open(uploaded_file).convert("RGB")
+        return {"type": "image", "data": image, "array": np.array(image)}
 
-        return{
-                    "type":"dicom",
-                    "data":Image.fromarray(img_array),
-                    "array":img_array,
-                }
-    elif ext in ['nii','nii.gz']:
-        temp_path=f"temp_{uuid.uuid4()}.nii.gz"
-        with open(temp_path,'wb') as f:
-            f.write(uploaded_file.getvalue())
-        nii_img=nib.load(temp_path)
-        img_array=nii_img.get_fdata()[:,:,nii_img.shape[2]//2]
-        img_array=((img_array-img_array.min())/(img_array.max()-img_array.min())*255).astype(np.uint8)
-        os.remove(temp_path)
-        return {"type":"nifti","data":Image.fromarray(img_array),"array":img_array}
-    
+    if name.endswith(".dcm"):
+        ds = pydicom.dcmread(uploaded_file)
+        img_array = _safe_normalise(ds.pixel_array)
+        pil = Image.fromarray(img_array)
+        if pil.mode != "RGB":
+            pil = pil.convert("RGB")
+        return {"type": "dicom", "data": pil, "array": img_array}
 
-def generate_heatmap(image_array):
-    if len(image_array.shape)==3:
-        gray_image=cv2.cvtColor(image_array,cv2.COLOR_RGB2GRAY)
+    if name.endswith(".nii") or name.endswith(".nii.gz"):
+        temp_path = f"temp_{uuid.uuid4()}.nii.gz"
+        try:
+            with open(temp_path, "wb") as fh:
+                fh.write(uploaded_file.getvalue())
+            nii_img = nib.load(temp_path)
+            vol = nii_img.get_fdata()
+            mid_slice = vol[:, :, vol.shape[2] // 2]
+            img_array = _safe_normalise(mid_slice)
+            pil = Image.fromarray(img_array).convert("RGB")
+            return {"type": "nifti", "data": pil, "array": img_array}
+        finally:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+
+    return None
+
+
+
+
+def generate_heatmap(image_array: np.ndarray):
+    """
+    Generate a JET colour-map heatmap overlay on *image_array*.
+
+    Returns:
+        (overlay_pil, heatmap_pil) -- both are RGB PIL Images.
+    """
+    if image_array.ndim == 3:
+        gray = cv2.cvtColor(image_array, cv2.COLOR_RGB2GRAY)
+        rgb_src = image_array
     else:
-        gray_image=image_array
-    
-    heatmap=cv2.applyColorMap(gray_image,cv2.COLORMAP_JET)
+        gray = image_array
+        rgb_src = cv2.cvtColor(image_array, cv2.COLOR_GRAY2RGB)
 
-    if len(image_array.shape)==2:
-        image_array=cv2.cvtColor(image_array,cv2.COLOR_GRAY2RGB)
-    overlay=cv2.addWeighted(heatmap,0.5,image_array,0.5,0)
+    heatmap_bgr = cv2.applyColorMap(gray, cv2.COLORMAP_JET)
+    heatmap_rgb = cv2.cvtColor(heatmap_bgr, cv2.COLOR_BGR2RGB)
 
-    return Image.fromarray(overlay),Image.fromarray(heatmap)
+    overlay_bgr = cv2.addWeighted(
+        heatmap_bgr, 0.5,
+        cv2.cvtColor(rgb_src, cv2.COLOR_RGB2BGR), 0.5, 0
+    )
+    overlay_rgb = cv2.cvtColor(overlay_bgr, cv2.COLOR_BGR2RGB)
+
+    return Image.fromarray(overlay_rgb), Image.fromarray(heatmap_rgb)
 
 
-def extract_findings_and_keywords(analysis_text):
-    findings=[]
-    keywords=[]
 
-    if 'Impression:' in analysis_text:
-        impression_section=analysis_text.split("Impression:")[1].strip()
-        numbered_items=impression_section.split("\n")
-        for item in numbered_items:
-            item=item.strip()
-            if item and (item[0].isdigit() or item[0]=='-' or item[0]=='*'):
-                clean_item=item
-                if item[0].isdigit() and "." in item[:3]:
-                    clean_item=item.split(".",1)[1].strip()
-                elif item[0] in ['-','*']:
-                    clean_item=item[1:].strip()
 
-                findings.append(clean_item)
-                for word in clean_item.split():
-                    word=word.lower().strip(',.:;()')
-                    if len(word)>4 and word not in ['about','with','that','this','these','those']:
-                        keywords.append(word)
+def extract_findings_and_keywords(analysis_text: str):
+    """Pull structured findings and keywords out of the LLM's markdown report."""
+    findings = []
+    keywords = []
 
-    common_terms=["pneumonia","infiltrates","opacities","nodule","mass","tumor","cardiomegaly","effusion","consolidation","atelectasis","edema","fracture","fibrosis","emphysema","pneumothorax","metastasis"]
+    if "Impression:" in analysis_text:
+        section = analysis_text.split("Impression:", 1)[1].strip()
+        for item in section.split("\n"):
+            item = item.strip()
+            if not item:
+                continue
+            if item[0].isdigit() or item[0] in ("-", "*", "•"):
+                clean = item.lstrip("0123456789.-*• ").strip()
+                if clean:
+                    findings.append(clean)
+                    for word in clean.split():
+                        word = word.lower().strip(",.:;()")
+                        if len(word) > 4 and word not in {
+                            "about", "with", "that", "this", "these", "those",
+                            "which", "their", "there", "where",
+                        }:
+                            keywords.append(word)
 
+    common_terms = [
+        "pneumonia", "infiltrates", "opacities", "nodule", "mass", "tumor",
+        "cardiomegaly", "effusion", "consolidation", "atelectasis", "edema",
+        "fracture", "fibrosis", "emphysema", "pneumothorax", "metastasis",
+    ]
     for term in common_terms:
         if term in analysis_text.lower() and term not in keywords:
             keywords.append(term)
 
-    keywords=list(dict.fromkeys(keywords))
-
-    return findings, keywords[:5]
+    return findings, list(dict.fromkeys(keywords))[:5]
 
 
 
-def analyze_image(image, api_key, enable_xai=True):
 
-    buffered=io.BytesIO()
-    image.save(buffered,format="PNG")
-    encoded_image=base64.b64encode(buffered.getvalue()).decode()
+def analyze_from_text(user_findings: str, api_key: str) -> dict:
+    """
+    Expand clinician observations into a full structured radiology report.
+    Uses the text model (gpt-oss-120b) via streaming.
+    """
+    findings: list = []
+    keywords: list = []
 
-    client=openai.OpenAI(api_key=api_key)
-    prompt="""
-            Provide a detailed medical analysis of this image.
-            Include:
-            1. Description of key findings
-            2. Possible diagnoses
-            3. Recommendation for clinical correlation or follow-up
-            
-            Format your response with "Radiological Analysis" and "Impression" sections.
-            """
-    
-   
+    prompt = (
+        ANALYSIS_PROMPT.strip()
+        + "\n\n---\nClinician observations:\n"
+        + user_findings.strip()
+        + "\n\nPlease produce a full report following the structure above."
+    )
+
     try:
-        response=client.chat.completions.create(
-            model="gpt-4-turbo",
-            messages=[{
-                "role":"user",
-                "content":[
-                    {"type":"text","text":prompt},
-                    {"type":"image_url","image_url":{"url":f"data:image/png;base64,{encoded_image}"}}
-                ]
-            }],max_tokens=800,
+        messages = [{"role": "user", "content": prompt}]
+        analysis = call_openrouter(api_key, messages, max_tokens=1200, temperature=0.2)
+        findings, keywords = extract_findings_and_keywords(analysis)
+        return {
+            "id": str(uuid.uuid4()),
+            "analysis": analysis,
+            "findings": findings,
+            "keywords": keywords,
+            "date": datetime.now().isoformat(),
+        }
+    except Exception as exc:
+        logger.error("analyze_from_text failed: %s", exc)
+        return {
+            "id": str(uuid.uuid4()),
+            "analysis": f"Error generating analysis: {exc}",
+            "findings": findings,
+            "keywords": keywords,
+            "date": datetime.now().isoformat(),
+        }
+
+
+
+
+def analyze_image(image_pil: Image.Image, api_key: str) -> dict:
+    """
+    Send the actual image to the vision model and get a structured report.
+    Falls back gracefully if the vision call fails.
+    """
+    findings: list = []
+    keywords: list = []
+
+    buf = io.BytesIO()
+    image_pil.convert("RGB").save(buf, format="JPEG", quality=85)
+    image_b64 = base64.b64encode(buf.getvalue()).decode()
+
+    try:
+        analysis = call_vision(
+            api_key,
+            image_b64,
+            ANALYSIS_PROMPT.strip(),
+            media_type="image/jpeg",
+            max_tokens=1200,
+            temperature=0.2,
         )
-
-        analysis=response.choices[0].message.content
-
-        
-        findings, keywords=extract_findings_and_keywords(analysis)
-
-        return{
-            "id":str(uuid.uuid4()),
-            "analysis":analysis,
-            "findings":findings,
-            "keywords":keywords,
-            "date":datetime.now().isoformat()
-            
+        findings, keywords = extract_findings_and_keywords(analysis)
+        return {
+            "id": str(uuid.uuid4()),
+            "analysis": analysis,
+            "findings": findings,
+            "keywords": keywords,
+            "date": datetime.now().isoformat(),
         }
-    except Exception as e:
-        return{
-            "id":str(uuid.uuid4()),
-            "analysis":f"Error analyzing image:{str(e)}",
-            "findings":[],
-            "keywords":[],
-            "date":datetime.now().isoformat()
+    except Exception as exc:
+        logger.error("analyze_image failed: %s", exc)
+        return {
+            "id": str(uuid.uuid4()),
+            "analysis": f"Error analysing image: {exc}",
+            "findings": findings,
+            "keywords": keywords,
+            "date": datetime.now().isoformat(),
         }
-    
-def search_pubmed(keywords, max_results=5):
+
+
+
+
+def search_pubmed(keywords: list, max_results: int = 5) -> list:
+    """
+    Search PubMed for articles related to the given keywords.
+    Returns [] on any error (no fake placeholder data).
+    """
     if not keywords:
         return []
-    
-    query=' AND '.join(keywords)
+
+    query = " AND ".join(keywords)
     try:
-        handle=Entrez.esearch(db="pubmed",term=query, retmax=max_results)
-        results=Entrez.read(handle)
+        search_handle = Entrez.esearch(db="pubmed", term=query, retmax=max_results)
+        search_results = Entrez.read(search_handle)
+        search_handle.close()
 
-        if not results["IdList"]:
+        id_list = search_results.get("IdList", [])
+        if not id_list:
             return []
-        
-        fetch_handle=Entrez.efetch(db="pubmed",id=results["IdList"],rettype="medline",retmode="text")
-        records=fetch_handle.read().split('\n\n')
 
-        publications=[]
-        for record in records:
-            if not record.strip():
+        fetch_handle = Entrez.efetch(
+            db="pubmed", id=id_list, rettype="medline", retmode="text"
+        )
+        records = list(Medline.parse(fetch_handle))
+        fetch_handle.close()
+
+        publications = []
+        for rec in records:
+            pmid = rec.get("PMID", "")
+            if not pmid:
                 continue
+            dp = rec.get("DP", "")
+            year = dp.split()[0] if dp else ""
+            if not year.isdigit():
+                year = ""
 
-            pub_data={"id":"","title":"","journal":"","year":""}
-
-            for line in record.split('\n'):
-                if line.startswith('PMID- '):
-                    pub_data["id"]=line[6:].strip()
-                elif line.startswith('TI - '):
-                    pub_data["title"]=line[6:].strip()
-                elif line.startswith('TA - '):
-                    pub_data["journal"]=line[6:].strip()
-                elif line.startswith('DP - '):
-                    year_match=line[6:].strip().split()[0]
-                    pub_data["year"]=year_match if year_match.isdigit() else "2024"
-                
-            if pub_data["id"]:
-                publications.append(pub_data)
-
+            publications.append({
+                "id": pmid,
+                "title": rec.get("TI", "No title"),
+                "journal": rec.get("TA", rec.get("JT", "Unknown journal")),
+                "year": year,
+            })
         return publications
-    
-    except Exception as e:
-        print(f"Error searching PubMed: {e}")
 
-        return [{"id":f"PMD{1000+i}",
-                 "title":f"Study on {' '.join(keywords)}",
-                 "journal":"Medical Journal",
-                 "year":"2024"} for i in range(min(3, max_results)) ]
-    
-
-def search_clinical_trials(keywords, max_results=3):
-    if not keywords:
+    except Exception as exc:
+        logger.warning("PubMed search failed: %s", exc)
         return []
-    
-    return  [{"id": f"NCT{1000+idx}",
-            "title": f"Clinical Trial on {' '.join(keywords[:2])}",
-            "status":"Recruiting",
-            "phase": f"Phase {idx+1}"}
-            for idx in range(max_results)]
 
-def generate_report(data,include_references=True):
-    buffer=io.BytesIO()
-    doc=SimpleDocTemplate(buffer,pagesize=letter)
-    styles=getSampleStyleSheet()
 
-  
-    title_style=ParagraphStyle(
-        'Title',
-        parent=styles['Heading1'],
-        fontSize=18,
-        spaceAfter=12
+
+
+def generate_report(data: dict, include_references: bool = True) -> io.BytesIO:
+    """Build a PDF report from an analysis dict and return a BytesIO buffer."""
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter)
+    styles = getSampleStyleSheet()
+
+    title_style = ParagraphStyle(
+        "CustomTitle", parent=styles["Heading1"], fontSize=18, spaceAfter=12
+    )
+    subtitle_style = ParagraphStyle(
+        "CustomSubtitle", parent=styles["Heading2"], fontSize=14, spaceAfter=8
     )
 
-    subtitle_style=ParagraphStyle(
-        'Subtitle',
-        parent=styles['Heading2'],
-        fontSize=14,
-        spaceAfter=8
-    )
+    def safe_para(text: str, style) -> Paragraph:
+        safe = (
+            str(text)
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+        )
+        return Paragraph(safe, style)
 
-    
-    content=[]
+    content = []
+    content.append(safe_para("Medical Imaging Analysis Report", title_style))
+    content.append(Spacer(1, 12))
+    content.append(safe_para(f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M')}", styles["Normal"]))
+    content.append(safe_para(f"Report ID: {data.get('id', 'N/A')}", styles["Normal"]))
+    if "filename" in data:
+        content.append(safe_para(f"Image: {data['filename']}", styles["Normal"]))
+    content.append(Spacer(1, 12))
 
+    content.append(safe_para("Analysis Result", subtitle_style))
+    content.append(safe_para(data.get("analysis", ""), styles["Normal"]))
+    content.append(Spacer(1, 12))
 
-    content.append(Paragraph("Medical Imaging Analysis Report", title_style))
-    content.append(Spacer(1,12))
+    if data.get("findings"):
+        content.append(safe_para("Key Findings", subtitle_style))
+        for idx, finding in enumerate(data["findings"], 1):
+            content.append(safe_para(f"{idx}. {finding}", styles["Normal"]))
+        content.append(Spacer(1, 12))
 
- 
-    content.append(Paragraph(f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M')}",styles["Normal"]))
-    content.append(Paragraph(f"Report ID:{data['id']}",styles["Normal"]))
-    if 'filename' in data:
-        content.append(Paragraph(f"Image: {data['filename']}",styles["Normal"]))
-    content.append(Spacer(1,12))
+    if data.get("keywords"):
+        content.append(safe_para("Keywords", subtitle_style))
+        content.append(safe_para(", ".join(data["keywords"]), styles["Normal"]))
+        content.append(Spacer(1, 12))
 
- 
-    content.append(Paragraph("Analysis Result", subtitle_style))
-    content.append(Paragraph(data['analysis'],styles["Normal"]))
-    content.append(Spacer(1,12))
-
-   
-    if data.get('findings'):
-        content.append(Paragraph("Key Finding",subtitle_style))
-        for idx, finding in enumerate(data['findings'],1):
-            content.append(Paragraph(f"{idx}.{finding}",styles["Normal"]))
-        content.append(Spacer(1,12))
-
-    if data.get('keywords'):
-        content.append(Paragraph("Keywords",subtitle_style))
-        content.append(Paragraph(f"{', '.join(data['keywords'])}",styles["Normal"]))
-        content.append(Spacer(1,12))
-
-    
     if include_references:
-        pubmed_results=search_pubmed(data.get('keywords',[]),max_results=3)
+        pubmed_results = search_pubmed(data.get("keywords", []), max_results=3)
         if pubmed_results:
-            content.append(Paragraph("Relevant Medical Literature",subtitle_style))
+            content.append(safe_para("Relevant Medical Literature", subtitle_style))
             for ref in pubmed_results:
-                content.append(Paragraph(f" {ref['title']}",styles["Normal"]))
-                content.append(Paragraph(f" {ref['journal']},{ref['year']}(PMID:{ref['id']})",styles["Normal"]))
-            content.append(Spacer(1,12))
+                content.append(safe_para(ref["title"], styles["Normal"]))
+                content.append(
+                    safe_para(
+                        f"{ref['journal']}, {ref['year']} (PMID: {ref['id']})",
+                        styles["Normal"],
+                    )
+                )
+            content.append(Spacer(1, 12))
 
-      
-        trial_results=search_clinical_trials(data.get('keywords',[]),max_results=2)
-        if trial_results:
-            content.append(Paragraph("Related Clinical Trials",subtitle_style))
-            for trial in trial_results:
-                content.append(Paragraph(f" {trial['title']}",styles["Normal"]))
-                content.append(Paragraph(f" ID:{trial['id']},Status:{trial['status']}",styles["Normal"]))
+        
 
-
-   
     doc.build(content)
     buffer.seek(0)
     return buffer
 
-def get_analysis_store():
-    """Get the analysis storage"""
-    if os.path.exists("analysis_store.json"):
-        with open("analysis_store.json","r") as f:
-            return json.load(f)
-    return{"analyses":[]}
-    
-def save_analysis(analysis_data,filename="unknown.jpg"):
-    store=get_analysis_store()
 
-   
-    analysis_data["filename"]=filename
 
-   
+
+_STORE_PATH = "data/analysis_store.json"
+
+
+def get_analysis_store() -> dict:
+    if os.path.exists(_STORE_PATH):
+        with open(_STORE_PATH, "r", encoding="utf-8") as fh:
+            try:
+                return json.load(fh)
+            except json.JSONDecodeError:
+                logger.warning("analysis_store.json is corrupt -- resetting.")
+    return {"analyses": []}
+
+
+def _atomic_write_store(store: dict) -> None:
+    """Write store atomically via temp file to reduce corruption risk."""
+    tmp = _STORE_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(store, fh, indent=2)
+    os.replace(tmp, _STORE_PATH)
+
+
+def save_analysis(analysis_data: dict, filename: str = "unknown.jpg") -> dict:
+    store = get_analysis_store()
+    analysis_data["filename"] = filename
     store["analyses"].append(analysis_data)
-
-    
-    with open("analysis_store.json","w") as f:
-        json.dump(store,f)
+    _atomic_write_store(store)
     return analysis_data
 
 
-
-def get_analysis_by_id(analysis_id):
-    store=get_analysis_store()
-
+def get_analysis_by_id(analysis_id: str) -> dict | None:
+    store = get_analysis_store()
     for analysis in store["analyses"]:
-        if analysis["id"]==analysis_id:
+        if analysis.get("id") == analysis_id:
             return analysis
-        
     return None
 
-def get_latest_analyses(limit=5):
-    store=get_analysis_store()
 
- 
-    sorted_analyses=sorted(store["analyses"],
-                           key=lambda x: x.get("date",""),
-                           reverse=True)
-    
+def get_latest_analyses(limit: int = 5) -> list:
+    store = get_analysis_store()
+    return sorted(
+        store["analyses"], key=lambda x: x.get("date", ""), reverse=True
+    )[:limit]
 
-    return sorted_analyses[:limit]
 
-def extract_common_findings():
-    store=get_analysis_store()
-
-    keyword_counts={}
+def extract_common_findings() -> list:
+    store = get_analysis_store()
+    keyword_counts: dict = {}
     for analysis in store["analyses"]:
-        for keyword in analysis.get("keywords",[]):
-            if keyword in keyword_counts:
-                keyword_counts[keyword]+=1
-            else:
-                keyword_counts[keyword]=1
-
-  
-    sorted_keywords=sorted(keyword_counts.items(),key=lambda x:x[1],reverse=True)
-
-    return sorted_keywords
+        for keyword in analysis.get("keywords", []):
+            keyword_counts[keyword] = keyword_counts.get(keyword, 0) + 1
+    return sorted(keyword_counts.items(), key=lambda x: x[1], reverse=True)
 
 
-def genrate_statistics_report():
-    store=get_analysis_store()
+
+def generate_statistics_report() -> io.BytesIO | None:
+    """Generate a PDF statistics report."""
+    store = get_analysis_store()
     if not store["analyses"]:
         return None
-    
-    type_counts={}
+
+    type_counts: dict = {}
     for analysis in store["analyses"]:
-        analysis_type=analysis.get("type","unknown")
-        if analysis_type in type_counts:
-            type_counts[analysis_type]+=1
-        else:
-            type_counts[analysis_type]=1
+        t = analysis.get("type", "unknown")
+        type_counts[t] = type_counts.get(t, 0) + 1
 
-   
-    common_findings=extract_common_findings()
+    common_findings = extract_common_findings()
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter)
+    styles = getSampleStyleSheet()
 
-   
-    buffer=io.BytesIO()
-    doc=SimpleDocTemplate(buffer, pagesize=letter)
-    styles=getSampleStyleSheet()
-
-    content=[]
-
-  
-    content.append(Paragraph("Medical Imaging Statistics Report",styles["Title"]))
-    content.append(Spacer(1,12))
-
-   
-
+    content = []
+    content.append(Paragraph("Medical Imaging Statistics Report", styles["Title"]))
+    content.append(Spacer(1, 12))
     content.append(Paragraph("Overall Statistics", styles["Heading2"]))
-    content.append(Paragraph(f"Total analysis: {len(store['analyses'])}",styles["Normal"]))
-    content.append(Spacer(1,12))
-
+    content.append(
+        Paragraph(f"Total analyses: {len(store['analyses'])}", styles["Normal"])
+    )
+    content.append(Spacer(1, 12))
 
     if type_counts:
-        content.append(Paragraph("Analysis Types",styles["Heading2"]))
+        content.append(Paragraph("Analysis Types", styles["Heading2"]))
         for type_name, count in type_counts.items():
-            content.append(Paragraph(f"{type_name.capitalize()}: {count}",styles["Normal"]))
+            content.append(
+                Paragraph(f"{type_name.capitalize()}: {count}", styles["Normal"])
+            )
+        content.append(Spacer(1, 12))
 
-        content.append(Spacer(1,12))
-
-   
     if common_findings:
-        content.append(Paragraph("Common Finding", styles["Heading2"]))
+        content.append(Paragraph("Common Findings", styles["Heading2"]))
         for keyword, count in common_findings[:10]:
-            content.append(Paragraph(f"{keyword.capitalize()}: {count} occurrences",styles["Normal"]))
-
+            content.append(
+                Paragraph(
+                    f"{keyword.capitalize()}: {count} occurrences", styles["Normal"]
+                )
+            )
 
     doc.build(content)
     buffer.seek(0)
@@ -401,35 +464,4 @@ def genrate_statistics_report():
 
 
 
-
-            
-
-
-
-    
-
-
-
-
-    
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-        
-
-
-
-
+genrate_statistics_report = generate_statistics_report
