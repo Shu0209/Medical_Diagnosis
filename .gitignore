@@ -5,3 +5,5 @@
 /analysis_store.json
 /chat_store.json
 /qa_chat_store.json
+/venv
+/.vscode
